@@ -212,4 +212,5 @@ __marimo__/
 creds/
 
 # Data
-data/
+data/tracking_*.json
+*.mp4
