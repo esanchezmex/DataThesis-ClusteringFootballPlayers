@@ -221,3 +221,5 @@ data/tracking_*.json
 tracking_*.json
 tracking_*.json
 *.mp4
+
+*.pdf
