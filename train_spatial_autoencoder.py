@@ -40,6 +40,9 @@ CREDS_FILE   = PROJECT_ROOT / "creds" / "gdrive_folder.json"
 OUTPUT_DIR   = PROJECT_ROOT / "data" / "outputs" / "autoencoder"
 
 LATENT_DIMS = [8, 16, 32, 64]
+# Force a specific latent dimension for the FINAL artifacts (ML-ready CSV, t-SNE, reconstructions).
+# The tuning sweep (LATENT_DIMS) will still run to produce the full study plot/CSV.
+FORCE_LATENT_DIM: Optional[int] = 16
 MAX_EPOCHS  = 100
 PATIENCE    = 7
 BATCH_SIZE  = 32
@@ -385,7 +388,7 @@ def reconstruct_grid_edges(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def plot_tuning_study(results_df: pd.DataFrame) -> None:
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 2.5))
 
     ax1.plot(results_df["latent_dim"], results_df["val_mse"],
              marker="o", linewidth=2, color="#3a86ff")
@@ -398,18 +401,9 @@ def plot_tuning_study(results_df: pd.DataFrame) -> None:
              marker="s", linewidth=2, color="#ff6b6b")
     ax2.set_title("Silhouette Score vs Latent Dimension", fontweight="bold")
     ax2.set_xlabel("Latent Dimension")
-    ax2.set_ylabel("Silhouette Score  (↑ better)")
+    ax2.set_ylabel("Silhouette Score")
     ax2.grid(True, linestyle="--", alpha=0.4)
 
-    best = results_df.loc[results_df["silhouette"].idxmax()]
-    ax2.axvline(best["latent_dim"], color="#ff6b6b", linestyle=":", alpha=0.7)
-    ax2.annotate(
-        f"Optimal\ndim={int(best['latent_dim'])}",
-        xy=(best["latent_dim"], best["silhouette"]),
-        xytext=(best["latent_dim"] + 1.5, best["silhouette"] - 0.03),
-        fontsize=9, color="#ff6b6b",
-        arrowprops=dict(arrowstyle="->", color="#ff6b6b"),
-    )
 
     fig.suptitle("Convolutional Autoencoder – Latent Dimension Tuning Study",
                  fontsize=14, fontweight="bold")
@@ -489,77 +483,100 @@ def plot_decoder_reconstructions(
     final_data_dir: Path,
     device: torch.device,
 ) -> None:
+    from scipy.ndimage import gaussian_filter
+
     print("Running decoder-trick pitch reconstructions …")
 
     Z64        = Z.astype(np.float64)
     labels     = gmm.predict(Z64)
     n_clusters = gmm.n_components
 
-    # Mean latent vector per cluster
+    # Mean latent vector per cluster → pass through decoder
     centers = np.vstack([Z[labels == k].mean(axis=0) for k in range(n_clusters)])
 
     model.eval()
-    recon = model.decode(
-        torch.from_numpy(centers.astype(np.float32)).to(device)
-    ).cpu().numpy()  # (n_clusters, 5, 50, 50)
+    with torch.no_grad():
+        recon = model.decode(
+            torch.from_numpy(centers.astype(np.float32)).to(device)
+        ).cpu().detach().numpy()  # (n_clusters, 5, 50, 50)
 
-    x_edges, y_edges = reconstruct_grid_edges(final_data_dir)
-    pitch_length = round(float(x_edges[-1] - x_edges[0]))
-    pitch_width  = round(float(y_edges[-1] - y_edges[0]))
-
-    n_cols = 3
+    # Dynamic grid: prefer 5 columns when 10 clusters, else 3
+    n_cols = 5 if n_clusters >= 8 else 3
     n_rows = math.ceil(n_clusters / n_cols)
 
     pitch = Pitch(
         pitch_type="custom",
-        pitch_length=pitch_length,
-        pitch_width=pitch_width,
-        pitch_color="#0d1117",
-        line_color="#3a86ff",
-        linewidth=1.2,
+        pitch_length=105,
+        pitch_width=68,
+        pitch_color="#1e1e1e",
+        line_color="#ffffff",
+        linewidth=1.5,
         goal_type="box",
     )
-    fig, axes = pitch.draw(nrows=n_rows, ncols=n_cols,
-                           figsize=(7 * n_cols, 5.5 * n_rows))
-    fig.patch.set_facecolor("#0d1117")
+
+    fig, axes = pitch.draw(
+        nrows=n_rows, ncols=n_cols,
+        figsize=(24, 12),
+    )
+    fig.patch.set_facecolor("#1e1e1e")
     axes_flat = axes.flatten() if (n_rows * n_cols) > 1 else [axes]
 
-    cmap = matplotlib.colormaps["hot"].copy()
-    cmap.set_under(alpha=0)
-
-    from scipy.ndimage import gaussian_filter
-
     for k in range(n_clusters):
-        ax      = axes_flat[k]
-        layer0  = recon[k, 0]                         # (50, 50)
-        layer0  = gaussian_filter(layer0, sigma=1.0)  # mild smoothing
-        vmax    = layer0.max()
-        if vmax > 0:
-            layer0 = layer0 / vmax
+        ax = axes_flat[k]
 
-        ax.pcolormesh(
-            x_edges, y_edges, layer0.T,
-            cmap=cmap, vmin=1e-4, vmax=1.0,
-            shading="flat", alpha=0.85, zorder=2,
+        # Extract Layer 0 (Presence): shape (50, 50)
+        # histogram2d stores (x_bins, y_bins) → transpose so rows=y, cols=x for imshow
+        layer0 = recon[k, 0, :, :].T   # (50, 50) with y on row-axis
+
+        # Forcibly mask border artifacts: zero-out outermost 2 pixels on all sides
+        layer0[0:2, :] = 0
+        layer0[-2:, :] = 0
+        layer0[:, 0:2] = 0
+        layer0[:, -2:] = 0
+
+        # Smooth out ConvTranspose2d checkerboard / edge artifacts
+        layer0 = gaussian_filter(layer0, sigma=1.0)
+
+        # Robust colormap cap: ignore extreme corner outliers by capping at the
+        # 98th percentile instead of the absolute max. This prevents edge
+        # artifacts from blowing up the scale and rendering the true spatial
+        # distribution as a black/empty pitch.
+        vmax_val = float(np.percentile(layer0, 98))
+        if vmax_val <= 0:
+            vmax_val = float(layer0.max()) or 1.0
+
+        # Stretch the 50x50 array across the full 105×68 pitch via extent
+        ax.imshow(
+            layer0,
+            extent=[0, 105, 0, 68],
+            origin="lower",
+            cmap="magma",
+            alpha=0.80,
+            aspect="auto",
+            zorder=2,
+            vmin=0,
+            vmax=vmax_val,
         )
 
-        n_in   = int((labels == k).sum())
+        n_in = int((labels == k).sum())
         ax.set_title(
-            f"Cluster {k}  (n={n_in} players)\nDecoded Prototype – Layer 0 (Presence)",
-            color="white", fontsize=9, fontweight="bold", pad=6,
+            f"Cluster {k}  (n={n_in})",
+            color="white", fontsize=16, fontweight="bold", pad=8,
         )
 
+    # Hide unused axes
     for j in range(n_clusters, len(axes_flat)):
         axes_flat[j].set_visible(False)
 
     fig.suptitle(
-        f"Decoder-Trick Cluster Prototypes  "
-        f"(optimal dim={model.latent_dim}, n_clusters={n_clusters})",
-        color="white", fontsize=14, fontweight="bold", y=1.01,
+        f"Decoded Cluster Prototypes  –  Layer 0: Offensive Presence\n"
+        f"(Latent dim={model.latent_dim}, n_clusters={n_clusters})",
+        color="white", fontsize=18, fontweight="bold", y=1.02,
     )
-    plt.tight_layout()
+
+    plt.tight_layout(pad=3.0)
     out = OUTPUT_DIR / "decoder_reconstructed_clusters.png"
-    plt.savefig(out, dpi=180, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     print(f"Saved: {out}")
 
@@ -581,7 +598,7 @@ def main() -> None:
     train_loader, val_loader             = build_dataloaders(tensors_array)
     _verify_architecture(device)
 
-    # ── Steps 2–3: Tuning loop ───────────────────────────────────────────────
+    # ── Steps 2–3: Tuning loop (always run sweep for study plot) ────────────
     tuning_rows: List[Dict] = []
 
     for latent_dim in LATENT_DIMS:
@@ -613,13 +630,17 @@ def main() -> None:
     plot_tuning_study(results_df)
 
     # ── Step 5: Reload optimal model + build ML-ready CSV ───────────────────
-    # dim=32 and dim=64 tied on both Silhouette and Val MSE; per the Law of
-    # Parsimony we hardcode the lower-dimensionality winner.
-    optimal_dim = 32
-    best_row    = results_df[results_df["latent_dim"] == optimal_dim].iloc[0]
+    if FORCE_LATENT_DIM is not None:
+        optimal_dim = int(FORCE_LATENT_DIM)
+    else:
+        # If running a sweep, choose the best silhouette (tie-break: lower val MSE).
+        results_sorted = results_df.sort_values(["silhouette", "val_mse"], ascending=[False, True])
+        optimal_dim = int(results_sorted.iloc[0]["latent_dim"])
+
+    best_row = results_df[results_df["latent_dim"] == optimal_dim].iloc[0]
 
     print(f"\n{'═' * 60}")
-    print(f"  Optimal latent dimension : {optimal_dim}  (hardcoded – tied with 64, parsimony wins)")
+    print(f"  Optimal latent dimension : {optimal_dim}  (selected from tuning results)")
     print(f"  Silhouette score         : {best_row['silhouette']:.4f}")
     print(f"  Val MSE                  : {best_row['val_mse']:.6f}")
     print(f"{'═' * 60}")

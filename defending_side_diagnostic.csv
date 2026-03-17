@@ -1,0 +1,5 @@
+match_id,period,team,team_q10_x,gk_med_x,gk_med_y,gk_trusted,defend_x_used,defending_plus_x
+3985528.0,1,2751,-43.37,-45.55,0.61,True,-45.55,False
+3985528.0,1,2757,-31.97,33.67,0.67,True,33.67,True
+3985528.0,2,2751,-25.05,40.35,-1.22,True,40.35,True
+3985528.0,2,2757,-36.94,-37.96,-1.07,True,-37.96,False

@@ -168,6 +168,60 @@ def update_histograms_for_match(
     if "player_id" not in df.columns:
         raise ValueError("Input data must contain 'player_id' column.")
 
+    # --- ATTACK-NORMALIZATION (matches GK sanity-check logic) ---
+    # Goal: make each team attack left-to-right (+X) in this centered coordinate system.
+    # Approach: per (match_id, period, team_id) compute a "defending side" proxy using median X,
+    # preferring the GK median-X when GK rows are available, otherwise falling back to team median-X.
+    # Then flip BOTH x and y for groups whose defending median x is positive (defending +X).
+    team_col = "team" if "team" in df.columns else ("team_id" if "team_id" in df.columns else None)
+    if team_col is None:
+        raise ValueError("Could not find a stable team column (expected 'team' or 'team_id').")
+
+    required_cols = {"match_id", "period", team_col, "x", "y"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Input data missing required columns for coord prep: {sorted(missing)}")
+
+    df = df.copy()
+    df["x"] = pd.to_numeric(df["x"], errors="coerce")
+    df["y"] = pd.to_numeric(df["y"], errors="coerce")
+
+    group_keys = ["match_id", "period", team_col]
+    # Fallback proxy for "deep defending line"
+    team_q10_x = df.groupby(group_keys, sort=False)["x"].quantile(0.10)
+    defend_x = team_q10_x.copy()
+
+    # Prefer GK median where we can identify GK rows
+    role_col: Optional[str] = None
+    for candidate in ("role_name", "position"):
+        if candidate in df.columns:
+            role_col = candidate
+            break
+
+    if role_col is not None:
+        gk_rows = df[df[role_col].astype(str).str.lower().eq("goalkeeper")]
+        if not gk_rows.empty:
+            gk_med_x = gk_rows.groupby(group_keys, sort=False)["x"].median()
+            # Only trust GK median if it's meaningfully away from midfield; otherwise fallback to q10.
+            GK_TRUST_THRESH = 30.0  # meters in centered coordinates
+            trusted = gk_med_x[gk_med_x.abs() >= GK_TRUST_THRESH]
+            defend_x.loc[trusted.index] = trusted
+
+    # Flip if defending median x is positive (defending +X)
+    flip_groups = set(defend_x[defend_x > 0].index.tolist())
+    flip_mask = df[group_keys].apply(tuple, axis=1).isin(flip_groups)
+
+    df["x_norm"] = df["x"].copy()
+    df["y_norm"] = df["y"].copy()
+    df.loc[flip_mask, "x_norm"] = -df.loc[flip_mask, "x_norm"]
+    df.loc[flip_mask, "y_norm"] = -df.loc[flip_mask, "y_norm"]
+
+    # Filter out optical tracking noise (Out of Bounds for SkillCorner centered pitch)
+    valid_x = (df["x_norm"] >= -52.5) & (df["x_norm"] <= 52.5)
+    valid_y = (df["y_norm"] >= -34.0) & (df["y_norm"] <= 34.0)
+    df = df[valid_x & valid_y].copy()
+    # ------------------------------------------------------------
+
     offensive_mask = get_offensive_mask(df)
     action_masks = build_action_masks(df)
 
@@ -224,8 +278,8 @@ def update_histograms_for_match(
 
         # Presence layer (0): all offensive frames for this player
         hx, _, _ = np.histogram2d(
-            player_df["x"].to_numpy(),
-            player_df["y"].to_numpy(),
+            player_df["x_norm"].to_numpy(),
+            player_df["y_norm"].to_numpy(),
             bins=[x_edges, y_edges],
         )
         profile.spatial_tensor[0] += hx.astype(np.float32)
@@ -239,8 +293,8 @@ def update_histograms_for_match(
             if not local_mask.any():
                 return np.zeros((len(x_edges) - 1, len(y_edges) - 1), dtype=np.float32)
             hx_loc, _, _ = np.histogram2d(
-                player_df.loc[local_mask, "x"].to_numpy(),
-                player_df.loc[local_mask, "y"].to_numpy(),
+                player_df.loc[local_mask, "x_norm"].to_numpy(),
+                player_df.loc[local_mask, "y_norm"].to_numpy(),
                 bins=[x_edges, y_edges],
             )
             return hx_loc.astype(np.float32)
@@ -349,10 +403,10 @@ def main() -> None:
 
     print(f"Found {len(parquet_files)} final match files in {input_dir}")
 
-    # Step 1: infer pitch bounds from the first file
-    sample_df = pd.read_parquet(parquet_files[0])
-    (x_min, x_max), (y_min, y_max) = infer_pitch_bounds(sample_df)
-    print(f"Inferred pitch bounds: x=[{x_min:.2f}, {x_max:.2f}], y=[{y_min:.2f}, {y_max:.2f}]")
+    # Step 1: fixed histogram bounds in centered stadium coordinates (SkillCorner grass limits)
+    x_min, x_max = -52.5, 52.5
+    y_min, y_max = -34.0, 34.0
+    print(f"Using fixed grass bounds: x=[{x_min:.1f}, {x_max:.1f}], y=[{y_min:.1f}, {y_max:.1f}]")
 
     n_bins_x = 50
     n_bins_y = 50
