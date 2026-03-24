@@ -1,0 +1,15 @@
+=== OLS regression: base cluster 1 (GK removed, outfield renormalised) ===
+n_samples = 24, n_predictors = 8
+R^2 = 0.3401
+df_resid = 15
+
+Coefficients (including intercept) with SE / t / p-value:
+  intercept: coef= 1.623497, se= 0.616225, t= 2.635, p=0.0187601
+  prob_cluster_2: coef= 1.350230, se= 0.906105, t= 1.490, p=0.156912
+  prob_cluster_3: coef=-0.194282, se= 0.921411, t=-0.211, p=0.83584
+  prob_cluster_4: coef= 2.446759, se= 2.024878, t= 1.208, p=0.245618
+  prob_cluster_5: coef= 0.444165, se= 0.764456, t= 0.581, p=0.569855
+  prob_cluster_6: coef= 0.685927, se= 1.063280, t= 0.645, p=0.528604
+  prob_cluster_7: coef=-0.666186, se= 1.067340, t=-0.624, p=0.541903
+  prob_cluster_8: coef= 0.829539, se= 0.927379, t= 0.894, p=0.385184
+  prob_cluster_9: coef= 0.060568, se= 1.330681, t= 0.046, p=0.964296
