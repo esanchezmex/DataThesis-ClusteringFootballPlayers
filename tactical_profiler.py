@@ -124,6 +124,7 @@ def plot_cluster_layers(
     """
     if cluster_mean.shape != (5, 50, 50) or global_mean.shape != (5, 50, 50):
         raise ValueError(f"Expected (5,50,50) means, got cluster={cluster_mean.shape} global={global_mean.shape}")
+    plt.rcParams["font.family"] = "Times New Roman"
 
     # Layer naming: these reflect what build_player_spatial_profiles.py currently encodes.
     layer_titles: List[str] = [
@@ -153,22 +154,22 @@ def plot_cluster_layers(
         pitch_type="custom",
         pitch_length=105,
         pitch_width=68,
-        pitch_color="#1e1e1e",
-        line_color="#ffffff",
+        pitch_color="white",
+        line_color="black",
         linewidth=1.5,
         goal_type="box",
     )
 
     # Avoid suptitle overlapping subplot titles by reserving top margin manually.
     fig, axes = plt.subplots(1, 5, figsize=(24, 5.2), constrained_layout=False)
-    fig.patch.set_facecolor("#1e1e1e")
+    fig.patch.set_facecolor("white")
 
     # Prepare all layers and share a per-layer robust vmax
     last_im = None
     for i in range(5):
         ax = axes[i]
         pitch.draw(ax=ax)
-        ax.set_facecolor("#1e1e1e")
+        ax.set_facecolor("white")
 
         if mode == "mean":
             layer = cluster_mean[i]
@@ -207,11 +208,36 @@ def plot_cluster_layers(
             vmax=vmax,
         )
 
-        ax.set_title(layer_titles[i], fontsize=11, color="white", fontweight="bold", pad=8)
+        ax.set_title(layer_titles[i], fontsize=10, color="black", fontweight="bold", pad=8)
+
+    # Add a global attacking-direction arrow (left → right) on the first subplot,
+    # using axes coordinates so it is always visible just above the top edge.
+    arrow_ax = axes[0]
+    arrow_ax.annotate(
+        "",
+        xy=(0.9, 1.18),      # end point (right)
+        xytext=(0.1, 1.18),  # start point (left)
+        xycoords="axes fraction",
+        textcoords="axes fraction",
+        arrowprops=dict(arrowstyle="->", color="black", linewidth=2),
+        clip_on=False,
+    )
+    arrow_ax.text(
+        0.5,
+        1.22,
+        "Attacking direction",
+        transform=arrow_ax.transAxes,
+        color="black",
+        ha="center",
+        va="bottom",
+        fontsize=10,
+        fontweight="bold",
+        clip_on=False,
+    )
 
     fig.suptitle(
         f"Tactical Profiler — Cluster {cluster_id} (n={n_players} players)\n{title_suffix}",
-        color="white",
+        color="black",
         fontsize=14,
         fontweight="bold",
         y=0.98,
@@ -221,19 +247,20 @@ def plot_cluster_layers(
     if last_im is not None:
         cbar = fig.colorbar(last_im, ax=axes, orientation="horizontal", fraction=0.05, pad=0.12)
         if mode == "mean":
-            cbar.set_label("probability mass (per-player, per-layer)", color="white")
+            cbar.set_label("probability mass (per-player, per-layer)", color="black")
         elif mode == "diff":
-            cbar.set_label("Δ probability mass (cluster − global)", color="white")
+            cbar.set_label("Δ probability mass (cluster − global)", color="black")
         else:  # logratio
-            cbar.set_label("log(cluster / global)", color="white")
-        cbar.ax.xaxis.set_tick_params(color="white")
+            cbar.set_label("log(cluster / global)", color="black")
+        cbar.ax.xaxis.set_tick_params(color="black", labelsize=10)
+        cbar.ax.xaxis.label.set_size(12)
         for tick in cbar.ax.get_xticklabels():
-            tick.set_color("white")
+            tick.set_color("black")
 
     out_path = OUT_DIR / f"cluster_{cluster_id}_tactical_profile_{mode}.png"
     # Leave space at top for the suptitle and at bottom for the horizontal colorbar.
     plt.tight_layout(rect=[0, 0.08, 1, 0.90])
-    plt.savefig(out_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out_path
 

@@ -421,6 +421,7 @@ def plot_tsne(
     latent_dim: int,
 ) -> None:
     print("Running t-SNE …")
+    plt.rcParams["font.family"] = "Times New Roman"
     perplexity = min(30, max(5, len(Z) // 5))
     tsne       = TSNE(n_components=2, random_state=SEED, perplexity=perplexity,
                       max_iter=1000, learning_rate="auto", init="pca")
@@ -438,8 +439,8 @@ def plot_tsne(
         has_roles = True
 
     fig, ax = plt.subplots(figsize=(13, 9))
-    fig.patch.set_facecolor("#0d1117")
-    ax.set_facecolor("#0d1117")
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
 
     if has_roles:
         palette   = sns.color_palette("tab20", n_colors=plot_df["role"].nunique())
@@ -451,26 +452,26 @@ def plot_tsne(
         )
         legend = ax.legend(
             title="Tactical Role", bbox_to_anchor=(1.02, 1),
-            loc="upper left", fontsize=8, title_fontsize=9,
-            facecolor="#1a1a2e", labelcolor="white",
+            loc="upper left", fontsize=10, title_fontsize=10,
+            facecolor="white", labelcolor="black",
         )
-        legend.get_title().set_color("white")
+        legend.get_title().set_color("black")
     else:
         ax.scatter(Z2[:, 0], Z2[:, 1], alpha=0.7, s=50, color="#3a86ff")
 
     for spine in ax.spines.values():
-        spine.set_edgecolor("#3a86ff")
-    ax.tick_params(colors="white")
-    ax.set_xlabel("t-SNE 1", color="white", fontsize=11)
-    ax.set_ylabel("t-SNE 2", color="white", fontsize=11)
+        spine.set_edgecolor("#333333")
+    ax.tick_params(colors="black", labelsize=10)
+    ax.set_xlabel("t-SNE 1", color="black", fontsize=12)
+    ax.set_ylabel("t-SNE 2", color="black", fontsize=12)
     ax.set_title(
-        f"t-SNE of Optimal Latent Space  (dim={latent_dim})\nColoured by Actual Tactical Role (SkillCorner)",
-        color="white", fontsize=13, fontweight="bold", pad=12,
+        f"t-SNE of Optimal Latent Space  (dim={latent_dim})\nColoured by Actual Tactical Role (from data provider)",
+        color="black", fontsize=14, fontweight="bold", pad=12,
     )
 
     plt.tight_layout()
     out = OUTPUT_DIR / "tsne_optimal_latent_space.png"
-    plt.savefig(out, dpi=170, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out}")
 
