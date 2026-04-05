@@ -2,12 +2,8 @@ import pandas as pd
 import numpy as np
 import glob
 import os
-import sys
 import json
-import subprocess
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing
 import time
 import ast
 import difflib
@@ -40,7 +36,7 @@ except ImportError:
 
 # --------------------------------------------------------------------------------------
 # Project paths (loaded from creds/gdrive_folder.json)
-# IMPORTANT: this script must NEVER write anything into the StatsBomb (Oakland Roots) dir.
+# IMPORTANT: this script must NEVER write anything into the read-only StatsBomb data directory.
 # All outputs (mapping + per-match merged parquets) are written under data_folder_path.
 # --------------------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -55,6 +51,28 @@ with open(CREDS_FILE, "r") as f:
 DATA_FOLDER_PATH = Path(_creds["data_folder_path"])
 STATSBOMB_DATA_FOLDER_PATH = Path(_creds["statsbomb_data_folder_path"])
 
+
+def _statsbomb_parquet_path(creds: dict, key: str) -> Path:
+    """
+    Resolve a StatsBomb parquet path from creds.
+
+    Values may be a basename relative to statsbomb_data_folder_path, or an absolute path.
+    Filenames are kept out of source control so competition-specific names stay in creds only.
+    """
+    if key not in creds or creds[key] is None or not str(creds[key]).strip():
+        raise ValueError(
+            f'Missing or empty "{key}" in {CREDS_FILE.name}. '
+            "Set it to your events / matches / player_season parquet filename, or an absolute path."
+        )
+    raw = str(creds[key]).strip()
+    p = Path(raw)
+    return p if p.is_absolute() else STATSBOMB_DATA_FOLDER_PATH / p
+
+
+STATSBOMB_EVENTS_FILE = _statsbomb_parquet_path(_creds, "statsbomb_events_parquet")
+STATSBOMB_MATCHES_FILE = _statsbomb_parquet_path(_creds, "statsbomb_matches_parquet")
+STATSBOMB_PLAYER_SEASON_FILE = _statsbomb_parquet_path(_creds, "statsbomb_player_season_parquet")
+
 # SkillCorner inputs
 SKILLCORNER_DIR = DATA_FOLDER_PATH / "skillcorner"
 # For full-season processing, this would be SKILLCORNER_DIR / "tracking".
@@ -62,11 +80,6 @@ SKILLCORNER_DIR = DATA_FOLDER_PATH / "skillcorner"
 SKILLCORNER_TRACKING_DIR = Path("/Users/estebansanchez/Desktop/batch10")
 SKILLCORNER_MATCHES_CSV = SKILLCORNER_DIR / "matches_df.csv"
 SKILLCORNER_PLAYERS_CSV = SKILLCORNER_DIR / "players_df.csv"
-
-# StatsBomb inputs (read-only)
-STATSBOMB_EVENTS_FILE = STATSBOMB_DATA_FOLDER_PATH / "USLChampionship_2025.parquet"
-STATSBOMB_MATCHES_FILE = STATSBOMB_DATA_FOLDER_PATH / "USLChampionship_2025_matches.parquet"
-STATSBOMB_PLAYER_SEASON_FILE = STATSBOMB_DATA_FOLDER_PATH / "USLChampionship_2025_player_season.parquet"
 
 # Outputs (all under thesis data folder; never under StatsBomb folder)
 OUTPUT_ROOT_DIR = DATA_FOLDER_PATH / "merged"
@@ -79,7 +92,6 @@ LOCAL_TRACKING_STAGING_DIR = Path.home() / "Desktop" / "Data_JSONs"
 
 # Backward-compatible names used in the original script
 RAW_DATA_DIR = STATSBOMB_DATA_FOLDER_PATH
-PROCESSED_DATA_DIR = DATA_FOLDER_PATH / "processed"  # not used unless you add tracking parquet outputs later
 USL_TRACKING_DIR = SKILLCORNER_TRACKING_DIR
 USL_DATA_DIR = SKILLCORNER_DIR
 
@@ -379,308 +391,6 @@ def build_match_id_mapping(date_tolerance_days=1, min_combined_score=1.40, overw
 
     return mapping_df
 
-def get_raw_tracking_files():
-    """
-    Get all raw tracking JSON files
-    
-    Returns:
-        list: List of raw tracking file paths
-    """
-    tracking_pattern = str(USL_TRACKING_DIR / 'tracking_*.json')
-    raw_files = glob.glob(tracking_pattern)
-    return raw_files
-
-def get_processed_tracking_files():
-    """
-    Get all processed tracking parquet files with velocity
-    
-    Returns:
-        set: Set of match IDs that have been processed
-    """
-    tracking_pattern = str(PROCESSED_DATA_DIR / 'tracking_*_with_velocity.parquet')
-    processed_files = glob.glob(tracking_pattern)
-    
-    processed_match_ids = set()
-    for file_path in processed_files:
-        # Extract match_id from filename
-        filename = os.path.basename(file_path)
-        match_id = int(filename.split('_')[1])
-        processed_match_ids.add(match_id)
-    
-    return processed_match_ids
-
-def get_unprocessed_raw_files():
-    """
-    Get raw tracking files that haven't been processed to parquet with velocity yet
-    
-    Returns:
-        list: List of unprocessed raw tracking file paths
-    """
-    raw_files = get_raw_tracking_files()
-    processed_match_ids = get_processed_tracking_files()
-    
-    unprocessed_files = []
-    for raw_file in raw_files:
-        # Extract match_id from filename
-        filename = os.path.basename(raw_file)
-        match_id = int(filename.split('_')[1].split('.')[0])
-        
-        if match_id not in processed_match_ids:
-            unprocessed_files.append(raw_file)
-    
-    print(f"Found {len(unprocessed_files)} unprocessed raw tracking files out of {len(raw_files)} total")
-    return unprocessed_files
-
-def process_raw_tracking_file(match_id, show_progress=False):
-    """
-    Process a single raw tracking file to create parquet with velocity
-    
-    Args:
-        match_id (int): Match ID to process
-        show_progress (bool): Whether to show detailed progress output
-        
-    Returns:
-        tuple: (match_id, success, error_message)
-    """
-    try:
-        # Path to the process_match.py script
-        script_path = PROJECT_ROOT / "src" / "data" / "process_match.py"
-        
-        cmd = [
-            sys.executable, str(script_path), str(match_id),
-            '--frame-gap', '25',
-            '--output-dir', str(PROCESSED_DATA_DIR)
-        ]
-        
-        if show_progress:
-            # Don't capture output so we can see the detailed progress
-            print(f"  📋 Loading raw tracking data for match {match_id}...")
-            print(f"  🔧 Command: {' '.join(cmd[-3:])}")  # Show relevant parts of command
-            print(f"  🔄 Starting detailed processing (this may take several minutes):")
-            print("     ↳ Loading JSON data...")
-            print("     ↳ Processing tracking frames...")
-            print("     ↳ Calculating velocities...")
-            print("     ↳ Saving to parquet format...")
-            print()
-            
-            result = subprocess.run(cmd, check=True)
-            print(f"\n  ✅ Match {match_id} processing completed successfully!")
-        else:
-            # Capture output for parallel processing (cleaner logs)
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        
-        return match_id, True, None
-        
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Subprocess error: {str(e)}"
-        if hasattr(e, 'stderr') and e.stderr:
-            error_msg += f" - {e.stderr}"
-        return match_id, False, error_msg
-    except Exception as e:
-        return match_id, False, f"Unexpected error: {str(e)}"
-
-def process_raw_tracking_file_wrapper(args):
-    """
-    Wrapper function for multiprocessing compatibility
-    
-    Args:
-        args: Tuple containing (match_id, raw_file_path, show_progress)
-        
-    Returns:
-        tuple: (match_id, success, error_message)
-    """
-    match_id, raw_file_path, show_progress = args
-    return process_raw_tracking_file(match_id, show_progress=show_progress)
-
-def process_all_unprocessed_raw_files(max_workers=None, use_parallel=True):
-    """
-    Process all raw tracking files that haven't been converted to parquet with velocity yet
-    
-    Args:
-        max_workers (int): Maximum number of parallel workers. If None, uses CPU count
-        use_parallel (bool): Whether to use parallel processing. If False, processes sequentially
-    
-    Returns:
-        tuple: (total_files, successfully_processed)
-    """
-    print("🔄 Checking for unprocessed raw tracking files...")
-    
-    unprocessed_files = get_unprocessed_raw_files()
-    
-    if not unprocessed_files:
-        print("✅ All raw tracking files have already been processed!")
-        return 0, 0
-    
-    # Determine number of workers
-    if max_workers is None:
-        max_workers = min(4, len(unprocessed_files))
-    else:
-        max_workers = min(max_workers, len(unprocessed_files))
-    
-    print(f"🔄 Processing {len(unprocessed_files)} raw tracking files...")
-    
-    if use_parallel and len(unprocessed_files) > 1:
-        print(f"🚀 Using parallel processing with {max_workers} workers")
-        print("💡 If the process is interrupted by memory, try: --sequential")
-        return _process_files_parallel(unprocessed_files, max_workers)
-    else:
-        print("🔄 Using sequential processing")
-        return _process_files_sequential(unprocessed_files)
-
-def _process_files_sequential(unprocessed_files):
-    """
-    Process files sequentially with detailed progress for each match
-    
-    Args:
-        unprocessed_files (list): List of unprocessed file paths
-        
-    Returns:
-        tuple: (total_files, successfully_processed)
-    """
-    successfully_processed = 0
-    total_processing_time = 0
-    
-    print("🔄 Sequential processing - showing detailed progress for each match:")
-    print("=" * 70)
-    
-    for i, raw_file in enumerate(unprocessed_files, 1):
-        # Extract match_id from filename
-        filename = os.path.basename(raw_file)
-        match_id = int(filename.split('_')[1].split('.')[0])
-        
-        print(f"\n📊 [{i}/{len(unprocessed_files)}] Starting Match {match_id}")
-        print("-" * 50)
-        
-        # Show file size information
-        file_size_mb = os.path.getsize(raw_file) / (1024 * 1024)
-        print(f"📁 File size: {file_size_mb:.1f} MB")
-        print(f"⏱️  Estimated time: {file_size_mb/50:.1f}-{file_size_mb/30:.1f} minutes")
-        
-        # Track processing time
-        start_time = time.time()
-        
-        # Use show_progress=True for detailed output
-        match_id_result, success, error_msg = process_raw_tracking_file(match_id, show_progress=True)
-        
-        # Calculate elapsed time
-        elapsed_time = time.time() - start_time
-        elapsed_minutes = elapsed_time / 60
-        
-        if success:
-            print(f"✅ Match {match_id} completed successfully!")
-            print(f"⏱️  Actual processing time: {elapsed_minutes:.1f} minutes")
-            successfully_processed += 1
-            total_processing_time += elapsed_time
-        else:
-            print(f"❌ Error processing match {match_id}: {error_msg}")
-            print(f"⏱️  Time before error: {elapsed_minutes:.1f} minutes")
-        
-        print("-" * 50)
-        
-        # Show overall progress and time estimates
-        remaining = len(unprocessed_files) - i
-        print(f"📈 Progress: {i}/{len(unprocessed_files)} completed, {remaining} remaining")
-        
-        if i > 0 and successfully_processed > 0:
-            avg_time_per_file = total_processing_time / successfully_processed
-            estimated_remaining_time = avg_time_per_file * remaining / 60  # in minutes
-            print(f"⏱️  Average time per file: {avg_time_per_file/60:.1f} minutes")
-            print(f"🕐 Estimated time remaining: {estimated_remaining_time:.1f} minutes ({estimated_remaining_time/60:.1f} hours)")
-    
-    print(f"\n🎉 Sequential processing complete!")
-    print(f"✅ Successfully processed: {successfully_processed}/{len(unprocessed_files)} files")
-    
-    if successfully_processed > 0:
-        total_time_hours = total_processing_time / 3600
-        avg_time_minutes = (total_processing_time / successfully_processed) / 60
-        print(f"⏱️  Total processing time: {total_time_hours:.1f} hours")
-        print(f"📊 Average time per file: {avg_time_minutes:.1f} minutes")
-    
-    return len(unprocessed_files), successfully_processed
-
-def _process_files_parallel(unprocessed_files, max_workers):
-    """
-    Process files in parallel using ProcessPoolExecutor
-    
-    Args:
-        unprocessed_files (list): List of unprocessed file paths
-        max_workers (int): Maximum number of parallel workers
-        
-    Returns:
-        tuple: (total_files, successfully_processed)
-    """
-    successfully_processed = 0
-    failed_files = []
-    
-    # Prepare arguments for parallel processing
-    processing_args = []
-    for raw_file in unprocessed_files:
-        filename = os.path.basename(raw_file)
-        match_id = int(filename.split('_')[1].split('.')[0])
-        processing_args.append((match_id, raw_file, False))  # show_progress=False for parallel
-    
-    print(f"🚀 Starting parallel processing of {len(processing_args)} files...")
-    
-    # Use ProcessPoolExecutor for CPU-bound tasks
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all jobs
-        future_to_match = {
-            executor.submit(process_raw_tracking_file_wrapper, args): args[0] 
-            for args in processing_args
-        }
-        
-        # Use tqdm for progress bar if available, otherwise basic progress
-        if HAS_TQDM:
-            with tqdm(total=len(future_to_match), desc="Processing matches", unit="match") as pbar:
-                for future in as_completed(future_to_match):
-                    match_id = future_to_match[future]
-                    try:
-                        result_match_id, success, error_msg = future.result()
-                        
-                        if success:
-                            pbar.set_postfix_str(f"✅ Match {result_match_id} completed")
-                            successfully_processed += 1
-                        else:
-                            pbar.set_postfix_str(f"❌ Match {result_match_id} failed")
-                            failed_files.append((result_match_id, error_msg))
-                            
-                    except Exception as e:
-                        pbar.set_postfix_str(f"❌ Match {match_id} exception")
-                        failed_files.append((match_id, f"Future exception: {str(e)}"))
-                    
-                    pbar.update(1)
-        else:
-            # Basic progress without tqdm
-            completed = 0
-            total_tasks = len(future_to_match)
-            for future in as_completed(future_to_match):
-                match_id = future_to_match[future]
-                completed += 1
-                try:
-                    result_match_id, success, error_msg = future.result()
-                    
-                    if success:
-                        print(f"  ✅ ({completed}/{total_tasks}) Match {result_match_id} completed")
-                        successfully_processed += 1
-                    else:
-                        print(f"  ❌ ({completed}/{total_tasks}) Match {result_match_id} failed: {error_msg}")
-                        failed_files.append((result_match_id, error_msg))
-                        
-                except Exception as e:
-                    print(f"  ❌ ({completed}/{total_tasks}) Match {match_id} exception: {str(e)}")
-                    failed_files.append((match_id, f"Future exception: {str(e)}"))
-    
-    # Print results summary
-    print(f"\n✅ Parallel processing complete!")
-    print(f"   Successfully processed: {successfully_processed}/{len(unprocessed_files)} files")
-    
-    if failed_files:
-        print(f"   Failed files ({len(failed_files)}):")
-        for match_id, error_msg in failed_files:
-            print(f"     ❌ Match {match_id}: {error_msg}")
-    
-    return len(unprocessed_files), successfully_processed
-
 def update_match_id_mappings_automatically():
     """
     Automatically update match ID mappings by finding unmapped matches
@@ -722,7 +432,7 @@ def update_match_id_mappings_automatically():
         
         # Load StatsBomb matches
         print("📊 Loading StatsBomb matches...")
-        sb_matches_file = RAW_DATA_DIR / 'USLChampionship_2025_matches.parquet'
+        sb_matches_file = STATSBOMB_MATCHES_FILE
         if not sb_matches_file.exists():
             print(f"❌ StatsBomb matches file not found: {sb_matches_file}")
             return False

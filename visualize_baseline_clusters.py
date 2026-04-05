@@ -20,6 +20,8 @@ import pandas as pd
 import seaborn as sns
 from mplsoccer import Pitch
 
+from paths import PROCESSED_PLAYER_PROFILES_PKL
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 CREDS_FILE = PROJECT_ROOT / "creds" / "gdrive_folder.json"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "outputs" / "baseline_model"
@@ -36,9 +38,8 @@ def resolve_paths() -> Tuple[Path, Path, Path]:
         cfg = json.load(f)
 
     final_data_dir = Path(cfg["final_data"])
-    profiles_dir   = final_data_dir.parent / "player_spatial_profiles"
     clusters_csv   = OUTPUT_DIR / "baseline_gmm_clusters.csv"
-    profiles_pkl   = profiles_dir / "processed_player_profiles.pkl"
+    profiles_pkl   = PROCESSED_PLAYER_PROFILES_PKL
 
     for p in (clusters_csv, profiles_pkl, final_data_dir):
         if not p.exists():

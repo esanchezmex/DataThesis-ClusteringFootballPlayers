@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
+
+from paths import PROCESSED_PLAYER_PROFILES_PKL
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.manifold import TSNE
@@ -64,7 +66,7 @@ def resolve_paths() -> Tuple[Path, Path]:
         cfg = json.load(f)
 
     final_data_dir = Path(cfg["final_data"])
-    profiles_pkl   = final_data_dir.parent / "player_spatial_profiles" / "processed_player_profiles.pkl"
+    profiles_pkl = PROCESSED_PLAYER_PROFILES_PKL
 
     if not profiles_pkl.exists():
         raise FileNotFoundError(f"Player profiles not found: {profiles_pkl}")
