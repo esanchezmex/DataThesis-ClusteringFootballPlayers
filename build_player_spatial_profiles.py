@@ -7,6 +7,8 @@ from typing import Dict, Tuple, Optional, List
 import numpy as np
 import pandas as pd
 
+from paths import PROCESSED_PLAYER_PROFILES_PKL
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 CREDS_FILE = PROJECT_ROOT / "creds" / "gdrive_folder.json"
@@ -34,9 +36,9 @@ class PlayerSeasonProfile:
     team_total_actions: int = 0
 
 
-def load_paths() -> Tuple[Path, Path]:
+def load_final_data_dir() -> Path:
     """
-    Load input/output directories from creds/gdrive_folder.json.
+    Resolve the final_data directory from creds/gdrive_folder.json (read-only input parquets).
     """
     if not CREDS_FILE.exists():
         raise FileNotFoundError(f"Missing creds file: {CREDS_FILE}")
@@ -44,15 +46,11 @@ def load_paths() -> Tuple[Path, Path]:
     with open(CREDS_FILE, "r") as f:
         cfg = json.load(f)
 
-    input_dir = Path(cfg["final_data"])  # strictly read-only
+    input_dir = Path(cfg["final_data"])
     if not input_dir.exists():
         raise FileNotFoundError(f"INPUT (final_data) directory does not exist: {input_dir}")
 
-    parent = input_dir.parent
-    output_dir = parent / "player_spatial_profiles"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    return input_dir, output_dir
+    return input_dir
 
 
 def infer_pitch_bounds(sample_df: pd.DataFrame) -> Tuple[Tuple[float, float], Tuple[float, float]]:
@@ -395,7 +393,7 @@ def compute_scalar_features(players: Dict[int, PlayerSeasonProfile]) -> pd.DataF
 
 
 def main() -> None:
-    input_dir, output_dir = load_paths()
+    input_dir = load_final_data_dir()
 
     parquet_files = sorted(input_dir.glob("*.parquet"))
     if not parquet_files:
@@ -424,8 +422,8 @@ def main() -> None:
     # Step 4: compute scalar features
     profiles_df = compute_scalar_features(players)
 
-    # Step 5: save final player profiles (one row per player)
-    output_path = output_dir / "processed_player_profiles.pkl"
+    # Step 5: save final player profiles (one row per player) at repo root
+    output_path = PROCESSED_PLAYER_PROFILES_PKL
     profiles_df.to_pickle(output_path)
     print(f"\nSaved processed player profiles to: {output_path}")
     print(f"Total players: {len(profiles_df)}")

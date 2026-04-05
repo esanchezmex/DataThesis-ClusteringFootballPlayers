@@ -1,8 +1,9 @@
-import json
 from pathlib import Path
 from typing import Tuple, List
 
 import matplotlib.pyplot as plt
+
+from paths import PROCESSED_PLAYER_PROFILES_PKL
 import numpy as np
 import pandas as pd
 from sklearn.mixture import GaussianMixture
@@ -10,28 +11,13 @@ from sklearn.preprocessing import StandardScaler
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-CREDS_FILE = PROJECT_ROOT / "creds" / "gdrive_folder.json"
 
 
 def load_profiles_path() -> Path:
-    """
-    Resolve the path to the processed_player_profiles.pkl file using creds.
-    """
-    if not CREDS_FILE.exists():
-        raise FileNotFoundError(f"Missing creds file: {CREDS_FILE}")
-
-    with open(CREDS_FILE, "r") as f:
-        cfg = json.load(f)
-
-    final_data_dir = Path(cfg["final_data"])
-    parent = final_data_dir.parent
-    profiles_dir = parent / "player_spatial_profiles"
-
-    profiles_path = profiles_dir / "processed_player_profiles.pkl"
-    if not profiles_path.exists():
-        raise FileNotFoundError(f"Player profiles file not found: {profiles_path}")
-
-    return profiles_path
+    """Path to processed_player_profiles.pkl at the repository root."""
+    if not PROCESSED_PLAYER_PROFILES_PKL.exists():
+        raise FileNotFoundError(f"Player profiles file not found: {PROCESSED_PLAYER_PROFILES_PKL}")
+    return PROCESSED_PLAYER_PROFILES_PKL
 
 
 def prepare_data(df: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame, np.ndarray, StandardScaler, List[str]]:

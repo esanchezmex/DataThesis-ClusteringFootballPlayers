@@ -8,8 +8,7 @@ spatial tensor per layer across all players assigned to that cluster.
 Inputs:
   - Cluster assignments: data/outputs/autoencoder/ml_ready_features_optimal.csv
     (If primary_cluster is missing, we fit a BIC-selected GMM on latent_* columns.)
-  - Player profiles: creds/gdrive_folder.json -> final_data sibling ->
-    player_spatial_profiles/processed_player_profiles.pkl
+  - Player profiles: processed_player_profiles.pkl at repository root (see paths.py)
 
 Output:
   - data/outputs/clusters/cluster_<k>_tactical_profile.png
@@ -18,7 +17,6 @@ Output:
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 from typing import Tuple, List
 
@@ -31,9 +29,10 @@ from mplsoccer import Pitch
 from scipy.ndimage import gaussian_filter
 from sklearn.mixture import GaussianMixture
 
+from paths import PROCESSED_PLAYER_PROFILES_PKL
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-CREDS_FILE = PROJECT_ROOT / "creds" / "gdrive_folder.json"
 AUTOENCODER_DIR = PROJECT_ROOT / "data" / "outputs" / "autoencoder"
 OUT_DIR = PROJECT_ROOT / "data" / "outputs" / "clusters"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,10 +44,7 @@ def resolve_inputs() -> Tuple[Path, Path]:
     if not clusters_csv.exists():
         raise FileNotFoundError(f"Missing clusters/features CSV: {clusters_csv}")
 
-    with open(CREDS_FILE) as f:
-        cfg = json.load(f)
-    final_data_dir = Path(cfg["final_data"])
-    profiles_pkl = final_data_dir.parent / "player_spatial_profiles" / "processed_player_profiles.pkl"
+    profiles_pkl = PROCESSED_PLAYER_PROFILES_PKL
     if not profiles_pkl.exists():
         raise FileNotFoundError(f"Missing player profiles pkl: {profiles_pkl}")
 
