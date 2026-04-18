@@ -10,10 +10,69 @@ The position-based approach to understanding player function has become increasi
 
 ---
 
-### Model Architecture
+## Baseline model performance
 
-<img src="Spatiotemporal Autoencoder Diagram-1.png" alt="Spatiotemporal Autoencoder Flowchart" width="600" />
+The scalar baseline clusters players without a convolutional encoder. It **does not** separate some role groups cleanly: for example **goalkeepers vs. center-backs**, and **midfield** players tend to overlap in the same components.
 
+<img src="data/outputs/baseline_model/cluster_vs_position.png" alt="Baseline cluster versus position heatmap" width="720" />
+
+*Figure: baseline cluster × position. Used as a sanity check that scalar features alone mix distinct lines.*
+
+---
+
+## Autoencoder
+
+### Model architecture
+
+The encoder stacks convolutions over the five spatial tensor channels; the bottleneck yields a **low-dimensional latent vector** per player, which is decoded back toward the input footprint for training.
+
+<img src="Spatiotemporal Autoencoder Diagram-1.png" alt="Spatiotemporal Autoencoder Flowchart" width="600" style="display:block; margin-bottom:0.10em;"/>
+
+*Figure: data flow from multi-channel pitch tensors → latent code → GMM clustering.*
+
+Latent size was chosen by **performing a tuning study**, by scoring reconstruction / validation-style metrics. Both metrics aligned on the optimal value of **16** latent dimensions.
+
+<img src="data/outputs/autoencoder/dimension_tuning_study.png" alt="Latent dimension tuning study" width="720" />
+
+*Figure: dimension tuning study (metrics vs. latent size).*
+
+---
+
+## Latent space (2D views)
+
+Each point is one **player-season** in latent space after training. **t-SNE** stresses local neighborhoods (clearly visualizes the fluid nature of roles); **PCA** is a fast linear projection (helps verify results with footballing logic and positioining, left sided players are together, central players together, and right sided players together).
+
+| t-SNE (optimal latent space) | PCA (quick preview) |
+|:---:|:---:|
+| <img src="data/outputs/autoencoder/tsne_optimal_latent_space.png" alt="t-SNE of optimal latent vectors" width="400" /> | <img src="data/outputs/autoencoder/pca_quick_preview.png" alt="PCA quick preview of latent vectors" width="400" /> |
+
+*Left: nonlinear 2D embedding of the optimal latent vectors. Right: first two principal components for the same representation.*
+
+---
+
+## Example cluster tactical profiles (log-ratio)
+
+After GMM clustering on latents, each cluster gets a **tactical profile**: tensor layers are compared to the league average on a **log-ratio** scale (positive = more than average in that cell, negative = less). The four panels below are a **sample** of clusters (0, 3, 4, 9) to show how spatial signatures differ between macro-roles.
+
+| Cluster 0 | Cluster 3 |
+|:---:|:---:|
+| <img src="data/outputs/clusters/cluster_0_tactical_profile_logratio.png" alt="Cluster 0 tactical profile log-ratio" width="400" /> | <img src="data/outputs/clusters/cluster_3_tactical_profile_logratio.png" alt="Cluster 3 tactical profile log-ratio" width="400" /> |
+| Cluster 4 | Cluster 9 |
+| <img src="data/outputs/clusters/cluster_4_tactical_profile_logratio.png" alt="Cluster 4 tactical profile log-ratio" width="400" /> | <img src="data/outputs/clusters/cluster_9_tactical_profile_logratio.png" alt="Cluster 9 tactical profile log-ratio" width="400" /> |
+
+*Figure: log-ratio heatmaps per cluster (warmer = stronger relative footprint in that pitch cell).*
+
+---
+
+## Regression (role mixture vs. xG): example coefficients
+
+Team-level OLS regresses **mean xG per match** (`xg_per_match`) on **outfield role-mixture probabilities** (goalkeeper mass removed and remaining roles renormalized). One specification **drops cluster 1 as the reference category**; each remaining term is “more of this macro-role vs. the reference,” holding the other mixture shares fixed.
+
+A **coefficient forest** plots those estimates with **95% normal-approximation intervals**: further from zero means a larger linear association with average match xG in this fit.
+
+<img src="data/outputs/regression/coef_forest_plot_base_cluster1.png" alt="Coefficient forest plot for baseline cluster 1 model" width="720" />
+
+*Figure: forest for the OLS run with cluster 1 omitted (panel shows clusters 2–9 only); read as exploratory association, not causal.*
 
 ---
 
@@ -124,5 +183,5 @@ This project is licensed under the **GNU General Public License v3.0** — see [
 If you reuse this repository, please cite the thesis:
 
 > **Spatiotemporal Representation Learning in Football: Defining Fluid Tactical Roles to Optimize Expected Goals (xG)**
-
-Esteban Sanchez Perezconde, IE University, 2026.
+> 
+> Esteban Sanchez Perezconde, IE University, 2026.
